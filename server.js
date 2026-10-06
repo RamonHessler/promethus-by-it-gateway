@@ -169,7 +169,9 @@ const server = http.createServer(async (req, res) => {
         lotSizeFilter: {
           minOrderAmt: Number(row.lotSizeFilter?.minOrderAmt ?? 0),
           minOrderQty: Number(row.lotSizeFilter?.minOrderQty ?? 0),
-          qtyStep: Number(row.lotSizeFilter?.qtyStep ?? 0),
+          basePrecision: row.lotSizeFilter?.basePrecision ?? null,
+          quotePrecision: row.lotSizeFilter?.quotePrecision ?? null,
+          qtyStep: row.lotSizeFilter?.qtyStep == null ? null : Number(row.lotSizeFilter.qtyStep),
           maxOrderQty: Number(row.lotSizeFilter?.maxOrderQty ?? 0),
         },
         priceFilter: { tickSize: Number(row.priceFilter?.tickSize ?? 0) },
