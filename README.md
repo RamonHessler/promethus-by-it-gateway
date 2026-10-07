@@ -83,13 +83,14 @@ async function load(){
    q("apocalypse_lineage_events","select=*&order=created_at.desc&limit=100"),
    q("apocalypse_control_audit","select=*&order=created_at.desc&limit=50")
   ]);
-  const s=state[0]||{},v=vault[0]||{};const latestCycle=cycles[0]||{};const latestEvents=latestCycle?.details?.events||[];const selectedEvents=latestEvents.filter(x=>x.type==="BUY");const lastSell=trades.find(t=>t.side==="SELL"&&t.realized_pnl!=null);
+  const s=state[0]||{},v=vault[0]||{};const latestCycle=cycles[0]||{};const latestEvents=latestCycle?.details?.events||[];const selectedEvents=latestEvents.filter(x=>x.type==="BUY");const lastSell=trades.find(t=>t.side==="SELL"&&t.realized_pnl!=null);const lastTransfer=controlAudit.find(x=>["STOP","WITHDRAW_ALL","FULL_EXIT"].includes(x.action));
   const wealth=a=>Number(a.equity||0)+Number(a.reproduction_fund||0)+Number(a.safety_reserve||0);
   const omega=agents.filter(a=>a.lineage==="OMEGA"), nexus=agents.filter(a=>a.lineage==="NEXUS");
   const ow=omega.reduce((z,a)=>z+wealth(a),0),nw=nexus.reduce((z,a)=>z+wealth(a),0);
   const omx=Math.max(1,...omega.map(a=>Number(a.generation||1))),nmx=Math.max(1,...nexus.map(a=>Number(a.generation||1)));
   const pricePairs=await Promise.all(pos.map(async p=>[p.symbol,await market(p.symbol)]));
   const priceMap=Object.fromEntries(pricePairs);const marketData=await marketUniverse();
+  const generationRows=[...new Set(agents.map(a=>a.lineage+"|"+a.generation))].map(k=>{const parts=k.split("|"),lineage=parts[0],g=Number(parts[1]);const xs=agents.filter(a=>a.lineage===lineage&&Number(a.generation)===g);const tw=xs.reduce((z,a)=>z+wealth(a),0),closed=xs.reduce((z,a)=>z+Number(a.closed_trades||0),0),wins=xs.reduce((z,a)=>z+Number(a.wins_count||0),0);return{lineage,g,count:xs.length,wealth:tw,winRate:closed?wins/closed*100:0}}).sort((a,b)=>a.lineage.localeCompare(b.lineage)||a.g-b.g);
   const e=document.querySelector("#engine");e.textContent=(s.engine_state||"—")+" · C"+(s.cycle_number||0);e.className="badge "+(s.engine_state==="PLAYING"?"ok":s.engine_state==="STOPPED"?"bad":"lock");
   document.querySelector("#arena").innerHTML=
    '<div class="card"><div class="title">CAPITAL DEMO</div><div class="metric">'+fmt(ow+nw)+'</div><div class="muted">Base inicial R$100 · R$50 por lado</div></div>'+
