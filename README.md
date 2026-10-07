@@ -50,8 +50,8 @@ document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.query
 async function q(table,params=""){const r=await fetch(S+"/rest/v1/"+table+"?"+params,{headers:H,cache:"no-store"});if(!r.ok)throw new Error(table+" "+r.status);return r.json()}
 async function market(symbol){
   try{
-    const r=await fetch("https://api.bybit.com/v5/market/tickers?category=spot&symbol="+encodeURIComponent(symbol),{cache:"no-store"});
-    const x=await r.json(); return Number(x?.result?.list?.[0]?.lastPrice||0)
+    const r=await fetch("https://prometheus-bybit-api-production.up.railway.app/bybit/klines?symbol="+encodeURIComponent(symbol)+"&interval=1&limit=2",{cache:"no-store"});
+    const x=await r.json(); return Number(x?.closes?.at(-1)||0)
   }catch{return 0}
 }
 async function load(){
