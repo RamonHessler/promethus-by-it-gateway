@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 const PORT = process.env.PORT || 3000;
 const BYBIT_BASE = "https://api.bybit.com";
 const json = (res, status, body) => {
-  res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
+  res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store", "access-control-allow-origin": "*", "access-control-allow-methods": "GET, OPTIONS", "access-control-allow-headers": "content-type" });
   res.end(JSON.stringify(body));
 };
 
@@ -34,6 +34,7 @@ const validSymbol = (symbol) => /^[A-Z0-9]{3,20}$/.test(symbol);
 
 const server = http.createServer(async (req, res) => {
   try {
+    if (req.method === "OPTIONS") { res.writeHead(204, { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, OPTIONS", "access-control-allow-headers": "content-type" }); return res.end(); }
     if (req.method !== "GET") return json(res, 405, { error: "method_not_allowed" });
     if (req.url === "/health") return json(res, 200, { ok: true, service: "prometheus-bybit-gateway" });
 
