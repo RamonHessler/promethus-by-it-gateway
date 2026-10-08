@@ -3,6 +3,8 @@ import crypto from "node:crypto";
 
 const PORT = process.env.PORT || 3000;
 const BYBIT_BASE = "https://api.bybit.com";
+const BINANCE_SPOT_BASE = "https://data-api.binance.vision";
+const BINANCE_FUTURES_BASE = "https://fapi.binance.com";
 const json = (res, status, body) => {
   res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store", "access-control-allow-origin": "*", "access-control-allow-methods": "GET, OPTIONS", "access-control-allow-headers": "content-type" });
   res.end(JSON.stringify(body));
@@ -24,6 +26,14 @@ async function bybit(path, auth = false) {
     headers["X-BAPI-SIGN"] = crypto.createHmac("sha256", secret).update(ts + key + rw + query).digest("hex");
   }
   const r = await fetch(url, { headers });
+  const text = await r.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = { raw: text.slice(0, 200) }; }
+  return { status: r.status, data };
+}
+
+async function publicJson(base, path) {
+  const r = await fetch(base + path, { headers: { accept: "application/json" } });
   const text = await r.text();
   let data;
   try { data = JSON.parse(text); } catch { data = { raw: text.slice(0, 200) }; }
@@ -191,6 +201,69 @@ const server = http.createServer(async (req, res) => {
       return json(res, x.status, {
         reachable: x.status === 200 && x.data?.retCode === 0, symbol,
         closes: rows.slice().reverse().map(c => Number(c[4])).filter(Number.isFinite),
+      });
+    }
+
+
+    if (req.url?.startsWith("/bybit/orderbook")) {
+      const u = new URL(req.url, "http://local");
+      const symbol = (u.searchParams.get("symbol") || "BTCUSDT").toUpperCase();
+      const category = u.searchParams.get("category") === "linear" ? "linear" : "spot";
+      const limit = Math.max(1, Math.min(200, Number(u.searchParams.get("limit") || 25)));
+      if (!validSymbol(symbol)) return json(res, 400, { error: "invalid_symbol" });
+      const x = await bybit("/v5/market/orderbook?category=" + category + "&symbol=" + encodeURIComponent(symbol) + "&limit=" + limit);
+      if (x.status !== 200 || x.data?.retCode !== 0) return json(res, 502, { error: "bybit_orderbook_unavailable", retCode: x.data?.retCode ?? null, retMsg: x.data?.retMsg ?? null });
+      return json(res, 200, { symbol, category, time: Number(x.data?.time || Date.now()), bids: x.data?.result?.b ?? [], asks: x.data?.result?.a ?? [] });
+    }
+
+    if (req.url === "/bybit/linear-universe") {
+      const all = [];
+      let cursor = "";
+      for (let page = 0; page < 10; page++) {
+        const suffix = cursor ? "&cursor=" + encodeURIComponent(cursor) : "";
+        const x = await bybit("/v5/market/instruments-info?category=linear&limit=1000" + suffix);
+        if (x.status !== 200 || x.data?.retCode !== 0) return json(res, 502, { error: "bybit_linear_universe_unavailable", retCode: x.data?.retCode ?? null, retMsg: x.data?.retMsg ?? null });
+        all.push(...(x.data?.result?.list ?? []));
+        cursor = x.data?.result?.nextPageCursor || "";
+        if (!cursor) break;
+      }
+      const t = await bybit("/v5/market/tickers?category=linear");
+      if (t.status !== 200 || t.data?.retCode !== 0) return json(res, 502, { error: "bybit_linear_tickers_unavailable" });
+      const ticks = new Map((t.data?.result?.list ?? []).map(x => [x.symbol, x]));
+      const instruments = all.map(x => {
+        const q = ticks.get(x.symbol) || {};
+        return {
+          symbol: x.symbol, status: x.status, symbolType: x.symbolType ?? null, contractType: x.contractType ?? null,
+          baseCoin: x.baseCoin ?? null, quoteCoin: x.quoteCoin ?? null, settleCoin: x.settleCoin ?? null,
+          fullName: x.fullName ?? null, underlyingTicker: x.underlyingTicker ?? null, marketRegion: x.marketRegion ?? null,
+          fundingInterval: Number(x.fundingInterval ?? 480),
+          lotSizeFilter: x.lotSizeFilter ?? null, priceFilter: x.priceFilter ?? null,
+          lastPrice: Number(q.lastPrice || 0), turnover24h: Number(q.turnover24h || 0), volume24h: Number(q.volume24h || 0),
+          fundingRate: q.fundingRate == null ? null : Number(q.fundingRate),
+          bid1Price: Number(q.bid1Price || 0), ask1Price: Number(q.ask1Price || 0),
+        };
+      });
+      return json(res, 200, { category: "linear", count: instruments.length, instruments, checkedAt: new Date().toISOString() });
+    }
+
+    if (req.url?.startsWith("/binance/book")) {
+      const u = new URL(req.url, "http://local");
+      const symbol = (u.searchParams.get("symbol") || "BTCUSDT").toUpperCase();
+      const market = (u.searchParams.get("market") || "SPOT").toUpperCase() === "PERP" ? "PERP" : "SPOT";
+      if (!validSymbol(symbol)) return json(res, 400, { error: "invalid_symbol" });
+      const base = market === "PERP" ? BINANCE_FUTURES_BASE : BINANCE_SPOT_BASE;
+      const depthPath = market === "PERP" ? "/fapi/v1/depth?symbol=" + encodeURIComponent(symbol) + "&limit=20" : "/api/v3/depth?symbol=" + encodeURIComponent(symbol) + "&limit=20";
+      const infoPath = market === "PERP" ? "/fapi/v1/exchangeInfo?symbol=" + encodeURIComponent(symbol) : "/api/v3/exchangeInfo?symbol=" + encodeURIComponent(symbol);
+      const [depth, info] = await Promise.all([publicJson(base, depthPath), publicJson(base, infoPath)]);
+      if (depth.status !== 200 || info.status !== 200) return json(res, 502, { error: "binance_market_unavailable", market, depthStatus: depth.status, infoStatus: info.status });
+      let fundingRate = null;
+      if (market === "PERP") {
+        const f = await publicJson(BINANCE_FUTURES_BASE, "/fapi/v1/premiumIndex?symbol=" + encodeURIComponent(symbol));
+        if (f.status === 200 && f.data?.lastFundingRate != null) fundingRate = Number(f.data.lastFundingRate);
+      }
+      return json(res, 200, {
+        market, symbol, bids: depth.data?.bids ?? [], asks: depth.data?.asks ?? [],
+        exchangeInfo: info.data, fundingRate, checkedAt: new Date().toISOString(),
       });
     }
 
