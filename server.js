@@ -216,6 +216,27 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { symbol, category, time: Number(x.data?.time || Date.now()), bids: x.data?.result?.b ?? [], asks: x.data?.result?.a ?? [] });
     }
 
+    if (req.url?.startsWith("/bybit/linear-instrument")) {
+      const u = new URL(req.url, "http://local");
+      const symbol = (u.searchParams.get("symbol") || "BTCUSDT").toUpperCase();
+      if (!validSymbol(symbol)) return json(res, 400, { error: "invalid_symbol" });
+      const [i, t] = await Promise.all([
+        bybit("/v5/market/instruments-info?category=linear&symbol=" + encodeURIComponent(symbol)),
+        bybit("/v5/market/tickers?category=linear&symbol=" + encodeURIComponent(symbol)),
+      ]);
+      const row = i.data?.result?.list?.[0];
+      const tick = t.data?.result?.list?.[0];
+      if (i.status !== 200 || i.data?.retCode !== 0 || !row) return json(res, 502, { error: "bybit_linear_instrument_unavailable", symbol });
+      return json(res, 200, {
+        symbol, status: row.status, fullName: row.fullName ?? null, underlyingTicker: row.underlyingTicker ?? null,
+        marketRegion: row.marketRegion ?? null, symbolType: row.symbolType ?? null, contractType: row.contractType ?? null,
+        lotSizeFilter: row.lotSizeFilter ?? null, priceFilter: row.priceFilter ?? null,
+        fundingInterval: Number(row.fundingInterval ?? 480),
+        fundingRate: tick?.fundingRate == null ? null : Number(tick.fundingRate),
+        checkedAt: new Date().toISOString(),
+      });
+    }
+
     if (req.url === "/bybit/linear-universe") {
       const all = [];
       let cursor = "";
